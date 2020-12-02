@@ -1,6 +1,7 @@
 # kubekube
 연습장에 있던걸 github에다가 기록해보자
-> k8s 테스트 환경을 위한 repository
+
+k8s 테스트 환경을 위한 repository
 
 
 ### ENV
