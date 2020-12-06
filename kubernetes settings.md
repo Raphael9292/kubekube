@@ -35,8 +35,8 @@ rm -rf /var/lib/docker
 sudo yum install -y yum-utils
 
 sudo yum-config-manager \
-    --add-repo \
-    https://download.docker.com/linux/centos/docker-ce.repo
+--add-repo \
+https://download.docker.com/linux/centos/docker-ce.repo
 ```
 
 #### Install Docker Engine
@@ -62,6 +62,7 @@ sudo yum-config-manager \
   sudo systemctl start docker
   
   # Set up the Docker daemon (https://kubernetes.io/docs/setup/production-environment/container-runtimes/#docker)
+  # cgroupdriver setting
   cat <<EOF | sudo tee /etc/docker/daemon.json
   {
     "exec-opts": ["native.cgroupdriver=systemd"],
@@ -79,6 +80,7 @@ sudo yum-config-manager \
   sudo systemctl enable docker
   sudo systemctl status docker -l
   ```
+
 
 
 ### [Installing kubeadm](https://v1-18.docs.kubernetes.io/docs/setup/production-environment/tools/kubeadm/install-kubeadm/)
@@ -129,8 +131,8 @@ sudo systemctl enable --now kubelet
 ```shell
 kubeadm init --kubernetes-version=v1.18.9 \
 --pod-network-cidr=10.0.0.0/16 \
---service-cidr=192.168.25.0/26 \
 --v=3 
+# --service-cidr=192.168.25.0/26 \
 ```   
 
 <details>
@@ -160,30 +162,54 @@ sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
 sudo chown $(id -u):$(id -g) $HOME/.kube/config
 ```
 
-Alternatively, if you are the root user, you can run:
-```shell
-export KUBECONFIG=/etc/kubernetes/admin.conf
-```
-
+만일 root user라면 다음 kubeconfig를 참고해서 `$HOME/.kube/config (default)`를 생성한다.   
+근데 노드조인 완료되고 나서 `kubeconfig`를 생성하는게 좋았다.   
+`export KUBECONFIG=/etc/kubernetes/admin.conf`
 
 
 ### [Installing a Pod network add-on](https://v1-18.docs.kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/#pod-network)
 
-#### [Install Calico](https://docs.projectcalico.org/getting-started/kubernetes/quickstart)
+#### [Install Calico](https://docs.projectcalico.org/getting-started/kubernetes/self-managed-onprem/onpremises#install-calico-with-kubernetes-api-datastore-50-nodes-or-less)
 *CNI를 설치하고 난 후에야 노드조인이 가능하다.*
 
 ```shell
-wget -O custom-resource.yaml https://docs.projectcalico.org/manifests/custom-resources.yaml
+wget -O calico.yaml https://docs.projectcalico.org/manifests/calico.yaml
 ```
 
+If you are using pod CIDR `192.168.0.0/16`, skip to the next step.    
+If you are using a different pod CIDR with kubeadm, no changes are required 
+> 그래서 `--pod-network-cidr` 와 매핑되는 값으로 변경 필요.
+- Calico will automatically detect the CIDR based on the running configuration.    
+For other platforms, make sure you uncomment the `CALICO_IPV4POOL_CIDR` variable in the manifest and set it to the same value as your chosen pod CIDR.
 
-### worker join
+### Worker join
 ```shell
-kubeadm join 192.168.25.30:6443 --token z7cxbb.2d1n4vc3l2t4decy \
-    --discovery-token-ca-cert-hash sha256:b5b124d4c4816d8dcccb88197aac4cae69a5bdf6acb2e1c46c4305a205fa30a6
+kubeadm join 192.168.25.30:6443 --v=5 \
+--token grqlx4.73xh3zmw03boa285 \
+--discovery-token-ca-cert-hash sha256:a24b925d95528c84c02583434a3aa465eb3d3a04b1912296e4346ff89900c44f
 ```
 
+- 만일 키를 읽어버렸다면? 
+  [Joining your nodes](https://v1-18.docs.kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/#join-nodes)
+  ```shell
+  kubeadm token create --print-join-command
+  ```
 
+
+---
+#### Node Join 이후 Worker Label 설정
+```shell
+# worker01 ROLES is none
+NAME       STATUS   ROLES    AGE     VERSION
+master     Ready    master   2m19s   v1.18.9
+worker01   Ready    <none>   12s     v1.18.9
+
+
+# 1.18 버전에서는 사용가능한 label이 변경되었다.
+kubectl label node worker01 node-role.kubernetes.io/worker=-
+# or
+kubectl label node worker01 node-role.kubernetes.io/worker=true
+```
 
 ---
 ### Node Join Fail
@@ -191,7 +217,8 @@ kubeadm join 192.168.25.30:6443 --token z7cxbb.2d1n4vc3l2t4decy \
 ```shell
 # join fail
 [root@worker01 ~]# kubeadm join 192.168.25.30:6443 --token kt69ja.jsi51tf1224i7zll \
->     --discovery-token-ca-cert-hash sha256:33b0bada7baa4c3a0e284c59f5182c2c5de58da44a2e06aa4e8206833fb723d6
+--discovery-token-ca-cert-hash sha256:33b0bada7baa4c3a0e284c59f5182c2c5de58da44a2e06aa4e8206833fb723d6
+
 W1207 01:08:08.824481   31282 join.go:346] [preflight] WARNING: JoinControlPane.controlPlane settings will be ignored when control-plane flag is not set.
 [preflight] Running pre-flight checks
         [WARNING IsDockerSystemdCheck]: detected "cgroupfs" as the Docker cgroup driver. The recommended driver is "systemd". Please follow the guide at https://kubernetes.io/docs/setup/cri/
@@ -203,7 +230,7 @@ error execution phase preflight: [preflight] Some fatal errors occurred:
 To see the stack trace of this error execute with --v=5 or higher
 
 
-# 에러 처리
+# 에러 처리 필요
 [root@worker01 ~]# lsof -i:10250
 COMMAND PID USER   FD   TYPE DEVICE SIZE/OFF NODE NAME
 kubelet 813 root   30u  IPv6  23876      0t0  TCP *:10250 (LISTEN)
@@ -214,6 +241,7 @@ kill -9 813
 # 이전 설정파일 제거
 rm -rf /etc/kubernetes/kubelet.conf /etc/kubernetes/pki/ca.crt
 
+# iptables reset
 iptables -Z # zero counters
 iptables -F # flush (delete) rules
 iptables -X # delete all extra chains
