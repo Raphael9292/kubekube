@@ -1,0 +1,124 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: promefana
+  labels:
+    app: promefana
+    tier: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: promefana
+      tier: backend
+  strategy:
+    type: RollingUpdate
+  minReadySeconds: 30
+  template:
+    metadata:
+      labels:
+        app: promefana
+        tier: backend
+    spec:
+      serviceAccountName: promefana
+      # affinity:
+      #   podAntiAffinity:
+      #     preferredDuringSchedulingIgnoredDuringExecution:
+      #       - podAffinityTerm:
+      #           labelSelector:
+      #             matchExpressions:
+      #               - key: app
+      #                 operator: In
+      #                 values:
+      #                   - promefana
+      #           topologyKey: kubernetes.io/hostname
+      #         weight: 100
+      #   nodeAffinity:
+      #     requiredDuringSchedulingIgnoredDuringExecution:
+      #       nodeSelectorTerms:
+      #         - matchExpressions:
+      #             - key: tier
+      #               operator: In
+      #               values:
+      #                 - backend
+      # imagePullSecrets:
+      #   - name: dockerhub
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.22.2
+          imagePullPolicy: Always
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "500m"
+              memory: "1Gi"
+          ports:
+            - name: prometheus-port
+              containerPort: 9090
+          livenessProbe:
+            tcpSocket:
+              port: prometheus-port
+            initialDelaySeconds: 35
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: prometheus-port
+            initialDelaySeconds: 30
+            timeoutSeconds: 10
+          volumeMounts:
+            - mountPath: /etc/prometheus/prometheus.yml
+              name: promefana-config
+              readOnly: true
+              subPath: prometheus.yml
+        - name: grafana
+          image: grafana/grafana:7.3.3
+          imagePullPolicy: Always
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "500m"
+              memory: "1Gi"
+          ports:
+            - name: grafana-port
+              containerPort: 3000
+          livenessProbe:
+            tcpSocket:
+              port: grafana-port
+            initialDelaySeconds: 35
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: grafana-port
+            initialDelaySeconds: 30
+            timeoutSeconds: 10
+          volumeMounts:
+            - mountPath: /etc/grafana/grafana.ini
+              name: promefana-config
+              readOnly: true
+              subPath: grafana.ini
+            - mountPath: /etc/grafana/provisioning/datasources/prometheus.yaml
+              name: promefana-config
+              readOnly: true
+              subPath: datasources-prometheus.yaml
+            - mountPath: /etc/grafana/provisioning/dashboards/dashboard.yaml
+              name: promefana-config
+              readOnly: true
+              subPath: dashboards-dashboard.yaml
+            # - mountPath: /etc/dashboards/gateway/gateway.json
+            #   name: promefana-config
+            #   readOnly: true
+            #   subPath: etc-dashboard-gateway.json
+            # - mountPath: /etc/dashboards/frontdesk/promefana.json
+            #   name: promefana-config
+            #   readOnly: true
+            #   subPath: etc-dashboard-promefana.json
+      volumes:
+        - name: promefana-config
+          configMap:
+            name: promefana-config
